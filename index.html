@@ -604,6 +604,26 @@ html[data-motion="off"] .hero__title-word { animation:none!important; opacity:1;
   const clamp = (x, low = 0, high = 1) => Math.max(low, Math.min(high, x));
   const timecode = seconds => '00:' + String(Math.min(59, Math.floor(seconds))).padStart(2, '0');
   const saveName = 'Reel_Wet_Impact.html';
+  // Inside the Claude artifact viewer, files are offered through its downloads capability.
+  // Everywhere else (the hosted page, a saved copy) the plain browser download below is used.
+  let hostDownloads = null;
+  if (window.claude?.use) window.claude.use('downloads').then(found => { hostDownloads = found; }).catch(() => {});
+  async function hostSave(filename, data) {
+    try { await hostDownloads.save({ filename, data }); toast('Saved ' + filename + '.'); }
+    catch (error) {
+      if (error?.code === 'declined') toast('Save cancelled.');
+      else if (error?.code === 'rate_limited') toast('A save is already waiting for you. Finish that one first.');
+      else toast('Saving is unavailable here. Open the hosted page to download it.');
+    }
+  }
+  function dataUriBlob(uri) {
+    const comma = uri.indexOf(','), bytes = atob(uri.slice(comma + 1)), out = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) out[i] = bytes.charCodeAt(i);
+    return new Blob([out]);
+  }
+  // A viewer may add its own scripts around the page; the saved copy keeps only the page's own.
+  const foreignScript = new RegExp('<' + 'script\\b(?![^>]*\\b(?:data-source|type="application/json"))[^>]*>[\\s\\S]*?<' + '/script>', 'gi');
+  function pageSource() { return cleanSource.replace(foreignScript, ''); }
   let motion = !reduced.matches;
   try { const stored = localStorage.getItem('reelwet.motion.v4'); if (stored !== null) motion = stored === 'on' && !reduced.matches; } catch (_) { /* Local-file storage may be disabled. */ }
   root.dataset.motion = motion ? 'on' : 'off';
@@ -611,6 +631,11 @@ html[data-motion="off"] .hero__title-word { animation:none!important; opacity:1;
 
   $$('[data-asset]').forEach(image => { if (assets[image.dataset.asset]) image.src = assets[image.dataset.asset]; });
   $$('[data-download]').forEach(link => { if (assets[link.dataset.download]) link.href = assets[link.dataset.download]; });
+  $$('[data-download]').forEach(link => link.addEventListener('click', event => {
+    if (!hostDownloads) return;
+    event.preventDefault();
+    hostSave(link.getAttribute('download'), dataUriBlob(link.href));
+  }));
 
   let toastTimer;
   function toast(message) {
@@ -1061,6 +1086,7 @@ html[data-motion="off"] .hero__title-word { animation:none!important; opacity:1;
     setTimeout(() => URL.revokeObjectURL(url), 20000);
   }
   function saveExperience() {
+    if (hostDownloads) { hostSave(saveName, pageSource()); return; }
     if (standalone) downloadBlob(new Blob([cleanSource], { type: 'text/html;charset=utf-8' }), saveName);
     else { const link = document.createElement('a'); link.href = 'Reel_Wet_Impact.html'; link.download = saveName; link.click(); }
     toast('The complete HTML file is ready to save. Open it in a browser.');
